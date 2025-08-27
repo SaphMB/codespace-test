@@ -33,7 +33,7 @@ apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker
 USER=$(whoami)
 usermod -aG docker $USER
 
-systemctl start docker
+/etc/init.d/docker start
 
 # Apply the new group membership
 newgrp docker
