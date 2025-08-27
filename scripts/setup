@@ -29,8 +29,8 @@ apt update
 apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
 # Add user to the docker group to manage Docker as a non-root user
-sudo groupadd docker
-sudo usermod -aG docker $USER
+groupadd docker
+usermod -aG docker $USER
 
 # Apply the new group membership
 newgrp docker
