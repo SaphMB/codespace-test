@@ -3,46 +3,46 @@ set -euxo pipefail
 
 echo "Running track setup script on host docker-vm"
 
-sudo apt update
-sudo apt install -y vim bash-completion nginx tree wget
+apt update
+apt install -y vim bash-completion nginx tree wget
 
-sudo wget https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64 -O /usr/bin/yq
-sudo chmod +x /usr/bin/yq
+wget https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64 -O /usr/bin/yq
+chmod +x /usr/bin/yq
 
 # sudo snap install --beta nvim --classic # Failing to load
 
-for pkg in docker.io docker-doc docker-compose docker-compose-v2 podman-docker containerd runc; do sudo apt-get remove $pkg || true; done
+for pkg in docker.io docker-doc docker-compose docker-compose-v2 podman-docker containerd runc; do apt-get remove $pkg || true; done
 
 # Add Docker's official GPG key:
-sudo apt -y install ca-certificates curl
-sudo install -m 0755 -d /etc/apt/keyrings
-sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-sudo chmod a+r /etc/apt/keyrings/docker.asc
+apt -y install ca-certificates curl
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+chmod a+r /etc/apt/keyrings/docker.asc
 
 # Add the repository to Apt sources:
 echo \
   "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
   $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
-  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+  tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-sudo apt update
-sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+apt update
+apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
 docker version
 
 curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
 mv kubectl /usr/bin
 chmod +x /usr/bin/kubectl
-/usr/bin/kubectl completion bash | sudo tee /etc/bash_completion.d/kubectl > /dev/null
+/usr/bin/kubectl completion bash | tee /etc/bash_completion.d/kubectl > /dev/null
 
 curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.29.0/kind-linux-amd64
 chmod +x ./kind
-sudo mv ./kind /usr/local/bin/kind
+mv ./kind /usr/local/bin/kind
 
 # Setup nginx on the Instruqt VM
 # The site configuration below enables access to the Todo App running on the
 #   nginx deployed on the Kubernetes Cluster
-sudo cat > /etc/nginx/sites-available/default <<EOF
+cat > /etc/nginx/sites-available/default <<EOF
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
@@ -56,7 +56,7 @@ server {
 }
 EOF
 
-sudo systemctl restart nginx
+systemctl restart nginx
 
 # Enable bash completion for kubectl
 bashrc="/root/.bashrc"
