@@ -1,0 +1,134 @@
+#!/bin/bash
+set -euxo pipefail
+
+echo "Running track setup script on host docker-vm"
+
+apt update
+apt install -y vim bash-completion nginx tree wget
+
+wget https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64 -O /usr/bin/yq
+chmod +x /usr/bin/yq
+
+# sudo snap install --beta nvim --classic # Failing to load
+
+for pkg in docker.io docker-doc docker-compose docker-compose-v2 podman-docker containerd runc; do apt-get remove $pkg || true; done
+
+# Add Docker's official GPG key:
+apt -y install ca-certificates curl
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+chmod a+r /etc/apt/keyrings/docker.asc
+
+# Add the repository to Apt sources:
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
+  $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+  tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+apt update
+apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+docker version
+
+curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+mv kubectl /usr/bin
+chmod +x /usr/bin/kubectl
+/usr/bin/kubectl completion bash | tee /etc/bash_completion.d/kubectl > /dev/null
+
+curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.29.0/kind-linux-amd64
+chmod +x ./kind
+mv ./kind /usr/local/bin/kind
+
+# Setup nginx on the Instruqt VM
+# The site configuration below enables access to the Todo App running on the
+#   nginx deployed on the Kubernetes Cluster
+cat > /etc/nginx/sites-available/default <<EOF
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+
+    server_name _;
+
+    location / {
+        proxy_pass http://localhost:31338;
+        proxy_set_header Host todo.local.gd;
+    }
+}
+EOF
+
+systemctl restart nginx
+
+# Enable bash completion for kubectl
+bashrc="/root/.bashrc"
+
+cat >> $bashrc <<EOF
+source /usr/share/bash-completion/bash_completion
+
+alias k=kubectl
+alias kaf="kubectl apply -f"
+complete -o default -F __start_kubectl k
+
+export PLATFORM=kind-platform
+export WORKER=kind-worker
+export KRATIX_MARKETPLACE_REPO="https://raw.githubusercontent.com/syntasso/kratix-marketplace/main"
+EOF
+
+mkdir -p bin
+curl -sLo ./bin/worker-resource-builder.tar.gz https://github.com/syntasso/kratix/releases/download/v0.0.4/worker-resource-builder_0.0.4_linux_amd64.tar.gz
+tar -xvf ./bin/worker-resource-builder.tar.gz -C ./bin
+mv ./bin/worker-resource-builder-v* ./bin/worker-resource-builder
+chmod +x ./bin/worker-resource-builder
+mv ./bin/worker-resource-builder /usr/local/bin/worker-resource-builder
+
+# install go
+curl -LO https://golang.org/dl/go1.22.5.linux-amd64.tar.gz
+rm -rf /usr/local/go && tar -C /usr/local -xzf go1.22.5.linux-amd64.tar.gz
+export PATH=$PATH:/usr/local/go/bin
+echo 'export PATH=$PATH:/usr/local/go/bin' >> /root/.bashrc
+
+git clone https://github.com/syntasso/kratix-cli /tmp/kratix-cli
+pushd /tmp/kratix-cli
+go get ./...
+go build -o /usr/local/bin/kratix cmd/kratix/main.go
+popd
+
+cd $HOME
+
+curl https://dl.min.io/client/mc/release/linux-amd64/mc \
+  --create-dirs \
+  -o $HOME/minio-binaries/mc
+chmod +x $HOME/minio-binaries/mc
+mv $HOME/minio-binaries/mc /usr/local/bin/mc
+rm -rf $HOME/minio-binaries
+
+git clone https://github.com/syntasso/kratix
+cd kratix
+
+export PLATFORM=kind-platform
+export WORKER=kind-worker
+export VERSION_KIND_NODE=v1.33.1
+
+kind delete clusters --all
+
+kind create cluster \
+    --name platform \
+    --image kindest/node:${VERSION_KIND_NODE} \
+    --config config/samples/kind-platform-config.yaml
+
+kubectl --context $PLATFORM apply --filename https://github.com/cert-manager/cert-manager/releases/download/v1.12.0/cert-manager.yaml
+kubectl --context $PLATFORM apply --filename config/samples/minio-install.yaml
+
+kind create cluster \
+    --name worker \
+    --image kindest/node:${VERSION_KIND_NODE} \
+    --config config/samples/kind-worker-config.yaml
+
+./scripts/install-gitops --context $WORKER --path worker-cluster
+
+kubectl --context $PLATFORM wait --for condition=available -n cert-manager deployment/cert-manager --timeout 100s
+kubectl --context $PLATFORM wait --for condition=available -n cert-manager deployment/cert-manager-cainjector --timeout 100s
+kubectl --context $PLATFORM wait --for condition=available -n cert-manager deployment/cert-manager-webhook --timeout 100s
+
+kubectl wait pod --context $PLATFORM -n kratix-platform-system --selector run=minio --for=condition=ready
+mc alias set kind http://localhost:31337 minioadmin minioadmin
+kubectl config use-context $PLATFORM
